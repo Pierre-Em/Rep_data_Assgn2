@@ -1,0 +1,187 @@
+---
+title: "Casualties and Economic Impact of Weather Events Across the US "
+date: "13/11/2020"
+output: html_document
+---
+
+# Synopsis
+
+The data from 1950 to 2011 is analyzed to find out what types of weather events are the most harmful to the population and what types are the most costly across the US. The data is extracted from the National Oceanic and Atmospheric Administration'S (NOAA) data base. 
+The analysis show that tornadoes are the most harmful to the US population in term of both fatalities and injuries. Floods are the most costly.
+
+# Data processing 
+
+The data is downloaded from the following website: [data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2)
+
+Check out source [1](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) and [2](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf) for information about the data set.
+
+The data set is loaded and the dates are converted to the right format to make the analysis easier.
+
+```{r, message = FALSE, warning = FALSE}
+## Loading the libraries needed for the analysis
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+```{r, cache=TRUE}
+## Download the data 
+fileURL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(fileURL, "Data_asgn2.csv.bz2", method = "curl")
+
+## Extract the data from the zip file
+DT <- read.csv("Data_asgn2.csv.bz2")
+
+## Dates are stored in dates format ignoring the time 
+DT$BGN_DATE <- as.Date(DT$BGN_DATE, format = "%m/%d/%Y")
+
+## Find out which events occurred the most and select the top 10
+tt <- table(DT$EVTYPE)
+max_tt <- as.data.frame(sort(tt, decreasing = TRUE)[1:10])
+names(max_tt) <- c("Event_type","Occurences")
+```
+
+Here are a few interesting information about the data set:
+
+* Number of observations : `r nrow(DT)`
+* Data is collected from `r min(DT$BGN_DATE)` to `r max(DT$BGN_DATE)`
+* Data is collected across `r length(unique(DT$STATE))` states
+* The data set records a total of `r length(unique(DT$EVTYPE))` different weather events
+* Total number of fatalities recorded : `r format(sum(DT$FATALITIES),scientific = F)`
+* Total number of injuries recorded : `r format(sum(DT$INJURIES), scientific = F)`
+* The top 10 occurrences in term of weather events recorded is as follow: 
+```{r}
+knitr::kable(max_tt)
+```
+
+# Results
+
+## Weather events - casualties
+
+In this section the number of death per type of event is presented. 
+
+``` {r, warning =FALSE, message = FALSE}
+## Group the number of death per type of event and calculate the total number of death
+DT_FAT <- DT %>% group_by(EVTYPE) %>% summarize(FATALITIES = sum(FATALITIES))
+
+## Group the number of death per type of event and calculate the total number of injuries
+DT_INJ <- DT %>% group_by(EVTYPE) %>% summarize(INJURIES = sum(INJURIES))
+
+## Extract the top 10 most harmful events
+DT_FAT_10 <- head(arrange(DT_FAT, desc(FATALITIES)),10)
+DT_INJ_10 <- head(arrange(DT_INJ, desc(INJURIES)),10)
+
+## Calculate the total number of other fatalities and injuries caused by the rest of these events
+DT_FAT_10 <- rbind(DT_FAT_10, c("Other events", sum(DT$FATALITIES)-sum(DT_FAT_10$FATALITIES)))
+DT_INJ_10 <- rbind(DT_INJ_10, c("Other events", sum(DT$INJURIES)-sum(DT_INJ_10$INJURIES)))
+
+## Clean the data set
+names(DT_FAT_10) <- c("EVTYPE","NUMBER")
+names(DT_INJ_10) <- c("EVTYPE","NUMBER")
+DT_FAT_10$NUMBER <- as.numeric(DT_FAT_10$NUMBER)
+DT_INJ_10$NUMBER <- as.numeric(DT_INJ_10$NUMBER)
+
+## Plot the results on a bar chart
+g1 <- ggplot(DT_FAT_10, aes(x= reorder(EVTYPE, -NUMBER),y = NUMBER)) + geom_bar(stat = "identity", alpha = .5) + labs(title = paste("Weather events fatalities in the US from",min(DT$BGN_DATE), "to", max(DT$BGN_DATE)), x = "Event Type", y = "Number of fatalities", caption = "Source : NOAA") + theme(axis.text.x = element_text(angle = 90)) + geom_text(aes(label = NUMBER))
+
+g2 <- ggplot(DT_INJ_10, aes(x= reorder(EVTYPE, -NUMBER),y = NUMBER)) + geom_bar(stat = "identity", alpha = .5) + labs(title = paste("Weather events injuries in the US from",min(DT$BGN_DATE), "to", max(DT$BGN_DATE)), x = "Event Type", y = "Number of injuries", caption = "Source : NOAA") + theme(axis.text.x = element_text(angle = 90)) + coord_cartesian(ylim=c(0,11000)) +  geom_text(y = 10000, aes(label = NUMBER), angle = 30)
+```
+
+The graphs below show the top 10 events most harmful to the population (fatalities and injuries):
+```{r}
+g1
+g2
+```
+
+To find the data including all the other events, please refer to the appendix section.
+
+**Tornadoes are by far the most harmful events in term of both fatalities and injuries.** 
+
+## Weather event - Economic consequences
+In this section the economic consequences of weather events is presented. Damages are evaluated using two parameters, the property damage and the crop damage. Both of them are presented below.
+
+```{r, warning = FALSE, message = FALSE}
+## Create a subset vector containing only the damage data
+DT_Dam <- select(DT,EVTYPE,PROPDMG,PROPDMGEXP,CROPDMG,CROPDMGEXP)
+
+## Create a function that calculates the total damage by using the exponent
+Calc_dam <- function(x, exp){
+    tot <- rep(0,length(x))
+    x[is.na(x)] <- 0 ## if the exponent is missing, return 0
+    tot[exp == "K"] <- x[exp == "K"]*1000
+    tot[exp == "M"] <- x[exp == "M"]*1000000
+    tot[exp == "B"] <- x[exp == "B"]*1000000000
+    tot
+}
+
+## Calculate the total damage for each type of damage and calculate the sum of the two
+DT_Dam$PROPDMGtot <- Calc_dam(DT_Dam$PROPDMG,DT_Dam$PROPDMGEXP)
+DT_Dam$CROPDMGtot <- Calc_dam(DT_Dam$CROPDMG,DT_Dam$CROPDMGEXP)
+DT_Dam$DMGtot <- DT_Dam$PROPDMGtot + DT_Dam$CROPDMGtot 
+
+## Calculate the total amount of damage per type of event
+Dam_Prop <- DT_Dam %>% group_by(EVTYPE) %>% summarize(Damage = sum(PROPDMGtot))
+Dam_Crop <- DT_Dam %>% group_by(EVTYPE) %>% summarize(Damage = sum(CROPDMGtot))
+Dam_tot <- DT_Dam %>% group_by(EVTYPE) %>% summarize(Damage = sum(DMGtot))
+
+## Retrieve the top 10 most damaging type of events
+Dam_tot_10 <- head(arrange(Dam_tot, desc(Damage)),10)
+
+## For these 10 variables calculate the damages due to property damage and crop damage
+for (i in 1:10){
+    Dam_tot_10$prop[i] <- Dam_Prop$Damage[Dam_Prop$EVTYPE == Dam_tot_10$EVTYPE[i]]
+    Dam_tot_10$crop[i] <- Dam_Crop$Damage[Dam_Crop$EVTYPE == Dam_tot_10$EVTYPE[i]]
+}
+
+## Calculate the total damage caused by the rest of these events
+Dam_tot_10 <- rbind(Dam_tot_10, c("Other events", sum(DT_Dam$DMGtot)-sum(Dam_tot_10$Damage),sum(Dam_Prop$Damage)-sum(Dam_tot_10$prop),sum(Dam_Crop$Damage)-sum(Dam_tot_10$crop)))
+
+## Convert to numerical values and set scale in billions of dollars
+Dam_tot_10$Damage <- as.numeric(Dam_tot_10$Damage)/1E9
+Dam_tot_10$prop <- as.numeric(Dam_tot_10$prop)/1E9
+Dam_tot_10$crop <- as.numeric(Dam_tot_10$crop)/1E9
+
+## Create a data frame usable for the bar chart
+Dam_graph <- select(Dam_tot_10,-Damage) %>% gather("DamageType", "Amount", -EVTYPE)
+
+## Plot the results on a bar chart
+g3 <- ggplot(Dam_graph, aes(x = reorder(EVTYPE,-Amount), y = Amount, fill = DamageType)) + geom_bar(stat = "identity", alpha = .5) + labs(title = paste("Economic consequences of weather events in the US from",min(DT$BGN_DATE), "to", max(DT$BGN_DATE)), x = "Event Type", y = "Cost [billions of USD]", caption = "Source : NOAA") + theme(axis.text.x = element_text(angle = 90), plot.title = element_text(size = 9)) + coord_flip() 
+
+```
+The graph below shows the economic consequences for the top 10 most costly weather events. Note that the cost is expressed in billions of dollars. More details are presented in appendix.
+```{r}
+g3
+```
+
+**Floods are by far the most costly weather event in term of economic consequences. Hurricane/Typhoons, tornadoes and storm surges are also very costly. Note that for most of the weather events the property damage cost is predominant compared to crop damage cost.** This is not always the case though (ex: Drought events).
+
+# Appendix
+## Fatalities per weather event
+Below is presented the number of fatalities per weather event from `r min(DT$BGN_DATE)` to `r max(DT$BGN_DATE)` in descending order for the weather events that have caused at least 10 fatalities in the related period of time:
+```{r}
+DT_FAT_t <- subset(DT_FAT, FATALITIES>10)
+knitr::kable(arrange(DT_FAT_t, desc(FATALITIES)))
+```
+
+## Injuries per weather event
+Below is presented the number of injuries per weather event from `r min(DT$BGN_DATE)` to `r max(DT$BGN_DATE)` in descending order for the weather events that have caused at least 10 injuries in the related period of time :
+```{r}
+DT_INJ_t <- subset(DT_INJ, INJURIES>10)
+knitr::kable(arrange(DT_INJ_t, desc(INJURIES)))
+```
+
+## Economical consequences per weather event
+Below is presented the economic consequences in billions of USD per weather event from `r min(DT$BGN_DATE)` to `r max(DT$BGN_DATE)` in descending order for the weather events that have caused at least 1,000,000USD damage in the related period of time :
+```{r}
+## Create a data set containing all economic costs 
+DT_cost <- merge(x = Dam_Prop, y = Dam_Crop, by = "EVTYPE")
+names(DT_cost) <- c("EVTYPE","Property_Damage", "Crop_Damage")
+DT_cost$Total_Cost <- DT_cost$Property_Damage + DT_cost$Crop_Damage
+
+## Convert numbers to billions of dollars
+DT_cost <- DT_cost %>% mutate(Property_Damage = Property_Damage/1E9, Crop_Damage = Crop_Damage/1E9, Total_Cost = Total_Cost/1E9)
+
+## Extract and print only the weather events that cost more than 1,000,000 USD
+DT_display <- subset(DT_cost, DT_cost$Total_Cost > 0.1)
+knitr::kable(arrange(DT_display,desc(Total_Cost)))
+```
